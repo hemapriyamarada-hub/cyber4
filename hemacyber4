@@ -1,0 +1,187 @@
+from flask import Flask, render_template, request, redirect, session, flash
+from flask_bcrypt import Bcrypt
+import sqlite3
+import re
+
+app = Flask(__name__)
+app.secret_key = "securekey"
+
+bcrypt = Bcrypt(app)
+
+# ---------------- DATABASE ----------------
+
+def init_db():
+    conn = sqlite3.connect('database.db')
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL
+        )
+    ''')
+
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# ---------------- HOME ----------------
+
+@app.route('/')
+def home():
+    return redirect('/login')
+
+# ---------------- REGISTER ----------------
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+
+    if request.method == 'POST':
+
+        username = request.form['username']
+        email = request.form['email']
+        password = request.form['password']
+
+        # Password Validation
+        if len(password) < 8:
+            flash("Password must contain at least 8 characters")
+            return redirect('/register')
+
+        if not re.search(r"[A-Z]", password):
+            flash("Password must contain one uppercase letter")
+            return redirect('/register')
+
+        if not re.search(r"[0-9]", password):
+            flash("Password must contain one number")
+            return redirect('/register')
+
+        # Hash Password
+        hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
+
+        try:
+            conn = sqlite3.connect('database.db')
+            cursor = conn.cursor()
+
+            # Prevent SQL Injection
+            cursor.execute(
+                "INSERT INTO users(username,email,password) VALUES(?,?,?)",
+                (username, email, hashed_password)
+            )
+
+            conn.commit()
+            conn.close()
+
+            flash("Registration Successful")
+            return redirect('/login')
+
+        except:
+            flash("User already exists")
+            return redirect('/register')
+
+    return '''
+    <h2>Register</h2>
+
+    <form method="POST">
+        Username:<br>
+        <input type="text" name="username" required><br><br>
+
+        Email:<br>
+        <input type="email" name="email" required><br><br>
+
+        Password:<br>
+        <input type="password" name="password" required><br><br>
+
+        <button type="submit">Register</button>
+    </form>
+
+    <a href="/login">Already have account? Login</a>
+    '''
+
+# ---------------- LOGIN ----------------
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+
+    if request.method == 'POST':
+
+        email = request.form['email']
+        password = request.form['password']
+
+        conn = sqlite3.connect('database.db')
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT * FROM users WHERE email=?",
+            (email,)
+        )
+
+        user = cursor.fetchone()
+
+        conn.close()
+
+        if user and bcrypt.check_password_hash(user[3], password):
+
+            session['user'] = user[1]
+
+            flash("Login Successful")
+            return redirect('/dashboard')
+
+        else:
+            flash("Invalid Email or Password")
+            return redirect('/login')
+
+    return '''
+    <h2>Secure Login</h2>
+
+    <form method="POST">
+
+        Email:<br>
+        <input type="email" name="email" required><br><br>
+
+        Password:<br>
+        <input type="password" name="password" required><br><br>
+
+        <button type="submit">Login</button>
+
+    </form>
+
+    <a href="/register">Create New Account</a>
+    '''
+
+# ---------------- DASHBOARD ----------------
+
+@app.route('/dashboard')
+def dashboard():
+
+    if 'user' in session:
+
+        return f'''
+        <h1>Welcome {session['user']}</h1>
+
+        <p>You are logged in successfully.</p>
+
+        <a href="/logout">
+            <button>Logout</button>
+        </a>
+        '''
+
+    return redirect('/login')
+
+# ---------------- LOGOUT ----------------
+
+@app.route('/logout')
+def logout():
+
+    session.pop('user', None)
+
+    flash("Logged Out Successfully")
+
+    return redirect('/login')
+
+# ---------------- RUN ----------------
+
+if __name__ == '__main__':
+    app.run(debug=True)
